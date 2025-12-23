@@ -1,0 +1,46 @@
+task: ph
+
+IPF_config:
+  config_path: MapDiff/conf
+  config_name: inference
+  output_dir: PipelineResults_ph
+
+sampling:
+  n: 1 # Number of sequences to generate
+  k: 4 # number of residues to select
+
+oracle_model:
+  checkpoint_dir: output/ph/PatchEX
+  checkpoint: 5280
+
+de_config:
+  wt_accession: string
+  selected_residue_idx: [ ]
+  wt_seq: string
+  oracle_model: InferenceModel
+  target_value: float
+  seed: 42
+  esm: esm2_t33_650M_UR50D  # Options: esm2_t6_8M_UR50D, esm2_t12_35M_UR50D, esm2_t30_150M_UR50D, esm2_t33_650M_UR50D
+  task: ph
+  evo_steps: 10
+  max_oracle_call_per_step: 100
+  max_mutation: 1
+  max_sample_steps: 100
+  internal_steps: 64
+  device: cuda  # Options: cpu, cuda (defaults to cuda if available)
+  batch_size: 64
+  oracle_batch_size: 16
+  parallel_samples: 128
+  lr: 0.001
+  oracle: wetlab
+  dropout: 0.1
+  embed_dim: 256
+  hidden_dim: 256
+  top_k: 100
+  patience: 3
+  eta: 0.1
+  ensemble: 3
+  run_times: 1
+  sampler: hmc  # Options: lmc, hmc, random
+  exp_name: default
+  onehot_constraint: 1
