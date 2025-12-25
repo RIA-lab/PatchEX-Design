@@ -61,10 +61,8 @@ pip install -r requirements.txt
 **⚠️ Important**: You must download the pre-trained model weights before running the pipeline.
 
 ```bash
-# Download pipeline_weight.zip from Zenodo
-wget https://mqoutlook-my.sharepoint.com/:u:/g/personal/ziqi_zhang_mq_edu_au/IQBYngpM7QrKRJTMFh4taBLmAVLxtMwKmptdS58XowSjqew?e=edeMdz
-
-# Or manually download from: https://mqoutlook-my.sharepoint.com/:u:/g/personal/ziqi_zhang_mq_edu_au/IQBYngpM7QrKRJTMFh4taBLmAVLxtMwKmptdS58XowSjqew?e=edeMdz
+# Download pipeline weight and data from Zenodo
+https://doi.org/10.5281/zenodo.18032906
 
 # Unzip the file
 unzip pipeline_weight.zip
@@ -92,12 +90,6 @@ EnzymeGPT/
 ├── pipeline.py
 ├── optimization.py
 └── ...
-```
-
-## Data download
-
-```bash
-https://mqoutlook-my.sharepoint.com/:u:/g/personal/ziqi_zhang_mq_edu_au/IQAdbWrW6YYzQYjAmyLOosN3ARGzJEaS4D2Up0oarf2frWI?e=dNSTQ2
 ```
 
 ## 💻 Usage
@@ -140,5 +132,6 @@ PipelineResults/Q96552/
 
 
 ---
+
 
 **Star ⭐ this repo if you find it useful!**
