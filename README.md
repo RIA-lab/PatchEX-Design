@@ -63,11 +63,20 @@ pip install -e "./PED-Eval[predictors,structure]"
 
 ## Download Data and Weights
 
-Download the PED-Eval dataset and predictor weights from Zenodo:
+Use the built-in asset bootstrapper to download, extract, and place the PED-Eval dataset, predictor weights, and PatchEX-Design pipeline weights automatically:
 
-[https://doi.org/10.5281/zenodo.19992035](https://doi.org/10.5281/zenodo.19992035)
+```bash
+python setup_assets.py --bundle ped-eval
+python setup_assets.py --bundle pipeline
+python setup_assets.py --bundle ped-eval --bundle pipeline
+```
 
-Unzip the downloaded zip files into the project root first. After extraction, the project root should contain at least:
+The downloader resolves these Zenodo records at runtime:
+
+- PED-Eval dataset and predictor weights: [https://doi.org/10.5281/zenodo.19992035](https://doi.org/10.5281/zenodo.19992035)
+- PatchEX-Design pipeline weights: [https://doi.org/10.5281/zenodo.19992598](https://doi.org/10.5281/zenodo.19992598)
+
+After setup, the project root should contain at least:
 
 ```text
 data_design/
@@ -81,21 +90,7 @@ predictor_weights/
 |-- ephod/
 |-- patchex_weight/
 `-- patchet_pretrain_weight/
-```
 
-Then download the PatchEX-Design pipeline weights from Zenodo:
-
-[https://doi.org/10.5281/zenodo.19992598](https://doi.org/10.5281/zenodo.19992598)
-
-Unzip the pipeline-weight zip file into the project root. Move the MapDiff checkpoint into the `MapDiff` directory:
-
-```bash
-mv mapdiff_weight.pt MapDiff/
-```
-
-The pipeline expects these paths:
-
-```text
 MapDiff/mapdiff_weight.pt
 patchex_weight/opt/model_config.yaml
 patchex_weight/opt/model.safetensors
@@ -111,6 +106,11 @@ predictor_weights/ephod/
 predictor_weights/patchex_weight/
 predictor_weights/patchet_pretrain_weight/
 ```
+
+Notes:
+
+- `python setup_assets.py --bundle pipeline` is also triggered automatically by `python pipeline.py ...` unless you pass `--skip-asset-setup`.
+- `bash run_pipeline.sh ...` automatically ensures both the PED-Eval data bundle and pipeline weights before batch execution.
 
 ## Run PatchEX-Design
 

@@ -67,6 +67,15 @@ TASK="$(printf '%s' "$4" | tr '[:upper:]' '[:lower:]')"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIPELINE_PY="$SCRIPT_DIR/pipeline.py"
+SETUP_PY="$SCRIPT_DIR/setup_assets.py"
+
+if [[ -f "$SETUP_PY" ]]; then
+	echo "[INFO] Ensuring PED-Eval data and PatchEX-Design weights are installed..."
+	if ! python "$SETUP_PY" --bundle ped-eval --bundle pipeline; then
+		echo "[ERROR] Automatic asset setup failed." >&2
+		exit 1
+	fi
+fi
 
 if [[ ! -f "$CSV_FILE" ]]; then
 	echo "[ERROR] CSV file not found: $CSV_FILE" >&2
@@ -215,4 +224,3 @@ fi
 if [[ $merge_failed -ne 0 ]]; then
 	exit 1
 fi
-

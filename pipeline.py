@@ -25,6 +25,7 @@ import yaml
 import os
 import shutil
 import sys
+from setup_assets import ensure_assets, AssetSetupError
 
 
 def resolve_runtime_device(device_preference=None):
@@ -357,7 +358,19 @@ if __name__ == "__main__":
     parser.add_argument('--pdb', type=str, required=True, help='input pdb file')
     parser.add_argument('--ec_pool', type=str, required=True, help='ec fasta file for psiblast')
     parser.add_argument('--target_value', type=float, required=True, help='target value for optimization')
+    parser.add_argument(
+        '--skip-asset-setup',
+        action='store_true',
+        help='skip automatic download/install of pipeline weights before execution',
+    )
     args = parser.parse_args()
+
+    if not args.skip_asset_setup:
+        try:
+            ensure_assets(bundles=('pipeline',))
+        except AssetSetupError as exc:
+            print(f'Automatic pipeline asset setup failed: {exc}', file=sys.stderr)
+            sys.exit(1)
 
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
