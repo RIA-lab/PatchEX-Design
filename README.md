@@ -61,56 +61,54 @@ For optional PED-Eval predictor and ESMFold structure metrics, install the optio
 pip install -e "./PED-Eval[predictors,structure]"
 ```
 
-## Download Data and Weights
+## Quick Start
 
-Use the built-in asset bootstrapper to download, extract, and place the PED-Eval dataset, predictor weights, and PatchEX-Design pipeline weights automatically:
+If you just want to run the workflow as fast as possible, do this:
+
+1. Install dependencies:
+
+   ```bash
+   pip install -r requirements.txt
+   pip install -e ./PED-Eval
+   ```
+
+   For PAS predictors and ESMFold-based structure metrics, use:
+
+   ```bash
+   pip install -e "./PED-Eval[predictors,structure]"
+   ```
+
+2. Run PatchEX-Design. The first run automatically downloads the pipeline assets if they are missing.
+
+3. Run PED-Eval on the generated FASTA. If PED-Eval reports missing data or predictor weights, use the fallback instructions in [Troubleshooting](#troubleshooting).
+
+### Fastest single-run example
 
 ```bash
-python setup_assets.py --bundle ped-eval
-python setup_assets.py --bundle pipeline
-python setup_assets.py --bundle ped-eval --bundle pipeline
+python pipeline.py \
+  --config pipeline_configs/config_temperature.yaml \
+  --pdb data_design/pdb/Q96552.pdb \
+  --ec_pool data_design/ec_pools/2.5.1.6.fasta \
+  --target_value 37.0
+
+ped-eval \
+  --task opt \
+  --result-fasta PipelineResults/opt/Q96552/Q96552.fasta \
+  --output-dir PED-Eval/outputs/opt_Q96552
 ```
 
-The downloader resolves these Zenodo records at runtime:
+### Fastest batch example
 
-- PED-Eval dataset and predictor weights: [https://doi.org/10.5281/zenodo.19992035](https://doi.org/10.5281/zenodo.19992035)
-- PatchEX-Design pipeline weights: [https://doi.org/10.5281/zenodo.19992598](https://doi.org/10.5281/zenodo.19992598)
+```bash
+bash run_pipeline.sh data_design/opt.csv data_design/ec_pools data_design/pdb opt
 
-After setup, the project root should contain at least:
-
-```text
-data_design/
-|-- opt.csv
-|-- ph.csv
-|-- pdb/
-|-- ec_pools/
-`-- functional_site_annotations/
-
-predictor_weights/
-|-- ephod/
-|-- patchex_weight/
-`-- patchet_pretrain_weight/
-
-MapDiff/mapdiff_weight.pt
-patchex_weight/opt/model_config.yaml
-patchex_weight/opt/model.safetensors
-patchex_weight/ph/model_config.yaml
-patchex_weight/ph/model.safetensors
-esm150/
+ped-eval \
+  --task opt \
+  --result-fasta PipelineResults/opt/result_all.fasta \
+  --output-dir PED-Eval/outputs/opt
 ```
 
-PED-Eval predictor mode expects predictor weights under:
-
-```text
-predictor_weights/ephod/
-predictor_weights/patchex_weight/
-predictor_weights/patchet_pretrain_weight/
-```
-
-Notes:
-
-- `python setup_assets.py --bundle pipeline` is also triggered automatically by `python pipeline.py ...` unless you pass `--skip-asset-setup`.
-- `bash run_pipeline.sh ...` automatically ensures both the PED-Eval data bundle and pipeline weights before batch execution.
+`run_pipeline.sh` automatically prepares both PED-Eval data and PatchEX-Design weights before batch execution.
 
 ## Run PatchEX-Design
 
@@ -194,6 +192,8 @@ ped-eval \
   --result-fasta PipelineResults/ph/result_all.fasta \
   --output-dir PED-Eval/outputs/ph
 ```
+
+For the most direct workflow, run the pipeline first and then point PED-Eval at the produced FASTA file. Only use `setup_assets.py` if you later hit missing-asset errors.
 
 By default PED-Eval reads:
 
@@ -310,10 +310,44 @@ print(report.summary)
 ## Troubleshooting
 
 - If `psiblast` is not found, install BLAST+ and ensure it is on `PATH`.
-- If `MapDiff/mapdiff_weight.pt` is missing, move `mapdiff_weight.pt` from the pipeline-weight extraction into `MapDiff/`.
+- If the automatic asset download fails, try:
+  ```bash
+  python setup_assets.py --bundle pipeline
+  python setup_assets.py --bundle ped-eval
+  ```
+  or download the Zenodo archives manually and place them under the expected paths listed below.
+- If `MapDiff/mapdiff_weight.pt` is missing, place `mapdiff_weight.pt` under `MapDiff/`.
 - If PatchEX-Design cannot load oracle weights, check `patchex_weight/opt/` and `patchex_weight/ph/`.
 - If PED-Eval PAS mode cannot load a predictor, check `predictor_weights/` and install `PED-Eval[predictors]`.
 - If `run_pipeline.sh` fails on Windows PowerShell, run it from WSL or Git Bash.
+
+Expected asset paths:
+
+```text
+data_design/
+|-- opt.csv
+|-- ph.csv
+|-- pdb/
+|-- ec_pools/
+`-- functional_site_annotations/
+
+predictor_weights/
+|-- ephod/
+|-- patchex_weight/
+`-- patchet_pretrain_weight/
+
+MapDiff/mapdiff_weight.pt
+patchex_weight/opt/model_config.yaml
+patchex_weight/opt/model.safetensors
+patchex_weight/ph/model_config.yaml
+patchex_weight/ph/model.safetensors
+esm150/
+```
+
+Zenodo sources:
+
+- PED-Eval dataset and predictor weights: [https://doi.org/10.5281/zenodo.19992035](https://doi.org/10.5281/zenodo.19992035)
+- PatchEX-Design pipeline weights: [https://doi.org/10.5281/zenodo.19992598](https://doi.org/10.5281/zenodo.19992598)
 
 ## Citation
 
