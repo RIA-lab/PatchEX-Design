@@ -11,11 +11,10 @@ from dataclasses import dataclass
 from optimization import run_psiblast, sampling, SeqItem, select_flexible_residues
 from patchEX_infer import InferenceModel
 from utils import map_mutated_residues
-from evaluation.structure import sequence_recovery
-from evaluation import Evaluator
 from typing import Literal
 import numpy as np
 import argparse
+import importlib.util
 import tempfile
 import logging
 import random
@@ -26,6 +25,35 @@ import os
 import shutil
 import sys
 from setup_assets import ensure_assets, AssetSetupError
+
+
+def load_ped_eval_single_sequence_api():
+    try:
+        from ped_eval import evaluate_single_sequence as ped_eval_single_sequence
+        return ped_eval_single_sequence
+    except ImportError:
+        ped_eval_init = os.path.join(
+            os.path.dirname(__file__),
+            "PED-Eval",
+            "ped_eval",
+            "__init__.py",
+        )
+        spec = importlib.util.spec_from_file_location(
+            "ped_eval",
+            ped_eval_init,
+            submodule_search_locations=[os.path.dirname(ped_eval_init)],
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load ped_eval from {ped_eval_init}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["ped_eval"] = module
+        spec.loader.exec_module(module)
+        return module.evaluate_single_sequence
+
+
+evaluate_single_sequence = load_ped_eval_single_sequence_api()
+# ESMFold metrics are optional; sequence_recovery is always expected.
+PIPELINE_REPORT_METRICS = ("sequence_recovery", "mean_plddt", "tm_score", "rmsd")
 
 
 def resolve_runtime_device(device_preference=None):
@@ -213,7 +241,6 @@ class Pipeline:
         oracle_model_config = dict(config['oracle_model'])
         oracle_model_config.setdefault('device', str(self.device))
         self.oracle_model = InferenceModel(**oracle_model_config)
-        self.evaluator = Evaluator(task=self.task)
 
     def __call__(self, pdb_file, ec_pool, target_value):
         pdb_accession = os.path.basename(pdb_file).split(".")[0]
@@ -297,7 +324,7 @@ class Pipeline:
                     mutated_residues = results['sequence'][best_idx]
                     best_pas = results['pas'][best_idx]
                     mapped_seq = map_mutated_residues(selected_residue_idx, [mutated_residues], wt_seq)[0]
-                    seq_rec = sequence_recovery(true_seq, mapped_seq)
+                    evaluation_metrics = {}
 
                     final_results = {
                         'accession': accession,
@@ -307,15 +334,23 @@ class Pipeline:
                         'perplexity': perplexity,
                         'mutated_residues': mutated_residues,
                         'selected_residue_idx': selected_residue_idx,
-                        'sequence_recovery': seq_rec,
                         'PAS': best_pas,
                         'output_dir': ipf_res
                     }
                     try:
-                        metric = self.evaluator(final_results, reference_pdb=pdb_file)
-                        final_results.update(metric)
+                        evaluation_metrics = evaluate_single_sequence(
+                            accession=accession,
+                            predicted_sequence=mapped_seq,
+                            native_sequence=true_seq,
+                            reference_pdb=pdb_file,
+                            use_esmfold=True,
+                            esmfold_output_dir=ipf_res,
+                        )
                     except Exception as eval_ex:
                         logger.error(f"Evaluation failed: {eval_ex}")
+                    for metric_name in PIPELINE_REPORT_METRICS:
+                        if metric_name in evaluation_metrics:
+                            final_results[metric_name] = evaluation_metrics[metric_name]
 
                     with open(f"{ipf_res}/report.json", 'w') as f:
                         json.dump(final_results, f, indent=4)

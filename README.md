@@ -307,6 +307,21 @@ write_report(report, "PED-Eval/outputs/opt_api")
 print(report.summary)
 ```
 
+PED-Eval also supports single-sequence evaluation. A FASTA with one accession works with `evaluate_task(...)` when that accession exists in the dataset CSV, and the direct API can evaluate one designed sequence against an in-memory native sequence plus a reference PDB:
+
+```python
+from ped_eval import evaluate_single_sequence
+
+metrics = evaluate_single_sequence(
+    accession="Q96552",
+    predicted_sequence="ACDE...",
+    native_sequence="ACDF...",
+    reference_pdb="data_design/pdb/Q96552.pdb",
+    use_esmfold=True,
+    esmfold_output_dir="PipelineResults/opt/Q96552",
+)
+```
+
 ## Troubleshooting
 
 - If `psiblast` is not found, install BLAST+ and ensure it is on `PATH`.
