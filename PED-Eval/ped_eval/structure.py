@@ -9,7 +9,7 @@ import subprocess
 import re
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ class ESMFoldEvaluator:
         Where to write predicted ``<accession>_pred.pdb`` files.
     """
 
-    def __init__(self, pdb_dir: str | Path, output_dir: str | Path) -> None:
+    def __init__(self, pdb_dir: Union[str, Path], output_dir: Union[str, Path]) -> None:
         import torch
         from transformers import AutoTokenizer, EsmForProteinFolding
 
@@ -97,7 +97,12 @@ class ESMFoldEvaluator:
         self.model = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").to(device)
         self.model.eval()
 
-    def __call__(self, accession: str, sequence: str) -> Dict[str, Any]:
+    def __call__(
+        self,
+        accession: str,
+        sequence: str,
+        reference_pdb: Optional[Union[str, Path]] = None,
+    ) -> Dict[str, Any]:
         import torch
 
         inputs = self.tokenizer([sequence], return_tensors="pt", add_special_tokens=False)
@@ -118,7 +123,9 @@ class ESMFoldEvaluator:
 
         mean_plddt = float(plddt_per_res.mean())
 
-        ref_pdb = str(self.pdb_dir / f"{accession}.pdb")
+        ref_pdb = str(Path(reference_pdb) if reference_pdb else self.pdb_dir / f"{accession}.pdb")
+        if not os.path.exists(ref_pdb):
+            raise FileNotFoundError(ref_pdb)
         tm_score, rmsd = _compute_tmscore(pred_pdb, ref_pdb)
 
         return {

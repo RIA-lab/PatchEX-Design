@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 
@@ -34,6 +34,9 @@ class EvaluationReport:
     task: str
     results: List[Dict[str, Any]]
     summary: Dict[str, Any]
+
+
+_ESMFOLD_EVALUATOR_CACHE: Dict[tuple[str, str], Any] = {}
 
 
 def _default_dataset_csv(task: str, data_path: Optional[Path] = None) -> Path:
@@ -176,21 +179,77 @@ def _build_summary(task: str, results: List[Dict[str, Any]]) -> Dict[str, Any]:
     return summary
 
 
+def evaluate_single_sequence(
+    accession: str,
+    predicted_sequence: str,
+    native_sequence: str,
+    reference_pdb: Optional[Union[str, Path]] = None,
+    use_esmfold: bool = False,
+    esmfold_output_dir: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    """Evaluate one designed sequence.
+
+    ``recovery_rate`` is the canonical PED-Eval field and ``sequence_recovery``
+    is the same value exposed for compatibility with older pipeline outputs.
+    """
+    accession = str(accession)
+    native_sequence = normalize_sequence(native_sequence)
+    predicted_sequence = normalize_sequence(predicted_sequence)
+
+    if len(native_sequence) != len(predicted_sequence):
+        raise ValueError(
+            f"Sequence length mismatch for {accession}: native sequence length {len(native_sequence)}, "
+            f"predicted sequence length {len(predicted_sequence)}. "
+            "Please ensure both sequences represent the same protein and are properly aligned."
+        )
+
+    sequence_recovery = compute_recovery_rate(native_sequence, predicted_sequence)
+    result: Dict[str, Any] = {
+        "accession": accession,
+        "sequence_length": len(native_sequence),
+        "recovery_rate": sequence_recovery,
+        "sequence_recovery": sequence_recovery,
+    }
+
+    if use_esmfold:
+        if reference_pdb is None:
+            raise ValueError("reference_pdb is required when use_esmfold=True")
+        from .structure import ESMFoldEvaluator
+
+        reference_pdb = Path(reference_pdb)
+        fold_out = Path(esmfold_output_dir) if esmfold_output_dir else Path("esmfold_output")
+        fold_out.mkdir(parents=True, exist_ok=True)
+        cache_key = (str(reference_pdb.parent.resolve()), str(fold_out.resolve()))
+        esmfold_evaluator = _ESMFOLD_EVALUATOR_CACHE.get(cache_key)
+        if esmfold_evaluator is None:
+            esmfold_evaluator = ESMFoldEvaluator(pdb_dir=reference_pdb.parent, output_dir=fold_out)
+            _ESMFOLD_EVALUATOR_CACHE[cache_key] = esmfold_evaluator
+        result.update(
+            esmfold_evaluator(
+                accession=accession,
+                sequence=predicted_sequence,
+                reference_pdb=reference_pdb,
+            )
+        )
+
+    return result
+
+
 def evaluate_task(
     task: str,
-    result_fasta: str | Path,
-    dataset_csv: str | Path | None = None,
-    pdb_dir: str | Path | None = None,
-    functional_sites_long_csv: str | Path | None = None,
-    data_path: str | Path | None = None,
+    result_fasta: Union[str, Path],
+    dataset_csv: Optional[Union[str, Path]] = None,
+    pdb_dir: Optional[Union[str, Path]] = None,
+    functional_sites_long_csv: Optional[Union[str, Path]] = None,
+    data_path: Optional[Union[str, Path]] = None,
     use_esmfold: bool = False,
-    esmfold_output_dir: str | Path | None = None,
+    esmfold_output_dir: Optional[Union[str, Path]] = None,
     enable_pas: bool = False,
     enable_thermo_proxies: bool = False,
-    predictor: str | None = None,
-    pas_sigma: float | None = None,
-    predictor_weights_dir: str | Path | None = None,
-    predictor_project_root: str | Path | None = None,
+    predictor: Optional[str] = None,
+    pas_sigma: Optional[float] = None,
+    predictor_weights_dir: Optional[Union[str, Path]] = None,
+    predictor_project_root: Optional[Union[str, Path]] = None,
     predictor_batch_size: int = 4,
 ) -> EvaluationReport:
     task = str(task).lower()
@@ -337,7 +396,7 @@ def evaluate_task(
     return EvaluationReport(task=task, results=results, summary=summary)
 
 
-def write_report(report: EvaluationReport, output_dir: str | Path) -> Dict[str, Path]:
+def write_report(report: EvaluationReport, output_dir: Union[str, Path]) -> Dict[str, Path]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
