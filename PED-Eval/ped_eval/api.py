@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -37,20 +39,139 @@ class EvaluationReport:
 
 
 _ESMFOLD_EVALUATOR_CACHE: Dict[tuple[str, str], Any] = {}
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _default_dataset_csv(task: str, data_path: Optional[Path] = None) -> Path:
-    base = data_path or Path("data_design")
+def _resolve_runtime_path(path_value: Optional[Union[str, Path]], *, repo_root: Path = REPO_ROOT) -> Optional[Path]:
+    if path_value is None:
+        return None
+
+    raw_path = Path(path_value).expanduser()
+    if raw_path.is_absolute():
+        return raw_path.resolve()
+
+    cwd_candidate = (Path.cwd() / raw_path).resolve()
+    if cwd_candidate.exists():
+        return cwd_candidate
+
+    return (repo_root / raw_path).resolve()
+
+
+def _default_data_path(repo_root: Path = REPO_ROOT) -> Path:
+    cwd_candidate = (Path.cwd() / "data_design").resolve()
+    if cwd_candidate.exists():
+        return cwd_candidate
+    return (repo_root / "data_design").resolve()
+
+
+def _default_predictor_weights_root(repo_root: Path = REPO_ROOT) -> Path:
+    cwd_candidate = (Path.cwd() / "predictor_weights").resolve()
+    if cwd_candidate.exists():
+        return cwd_candidate
+    return (repo_root / "predictor_weights").resolve()
+
+
+def _is_within_repo_subdir(path_value: Optional[Union[str, Path]], subdir_name: str, *, repo_root: Path = REPO_ROOT) -> bool:
+    resolved_path = _resolve_runtime_path(path_value, repo_root=repo_root)
+    if resolved_path is None:
+        return False
+
+    try:
+        relative_path = resolved_path.relative_to(repo_root)
+    except ValueError:
+        return False
+    return bool(relative_path.parts) and relative_path.parts[0] == subdir_name
+
+
+def _load_setup_assets_api(repo_root: Path = REPO_ROOT):
+    try:
+        from setup_assets import AssetSetupError, build_asset_targets, ensure_assets
+
+        return ensure_assets, AssetSetupError, build_asset_targets
+    except ImportError:
+        setup_assets_path = repo_root / "setup_assets.py"
+        if not setup_assets_path.exists():
+            return None
+
+        spec = importlib.util.spec_from_file_location("patchex_setup_assets", setup_assets_path)
+        if spec is None or spec.loader is None:
+            return None
+
+        module = importlib.util.module_from_spec(spec)
+        sys.modules.setdefault("patchex_setup_assets", module)
+        spec.loader.exec_module(module)
+        return module.ensure_assets, module.AssetSetupError, module.build_asset_targets
+
+
+def _ensure_repo_assets_for_evaluation(
+    *,
+    dataset_csv: Path,
+    pdb_dir: Path,
+    functional_sites_long_csv: Path,
+    enable_pas: bool,
+    predictor_weights_dir: Optional[Union[str, Path]],
+    predictor_project_root: Optional[Union[str, Path]],
+    auto_setup_assets: bool,
+    repo_root: Path = REPO_ROOT,
+) -> None:
+    if not auto_setup_assets:
+        return
+
+    setup_assets_api = _load_setup_assets_api(repo_root)
+    if setup_assets_api is None:
+        return
+
+    ensure_assets, AssetSetupError, build_asset_targets = setup_assets_api
+    asset_targets = build_asset_targets(repo_root)
+    requested_bundles: list[str] = []
+
+    uses_repo_data = any(
+        _is_within_repo_subdir(path, "data_design", repo_root=repo_root)
+        for path in (dataset_csv, pdb_dir, functional_sites_long_csv)
+    )
+    if uses_repo_data and not asset_targets["data_design"].is_installed():
+        requested_bundles.append("ped-eval")
+
+    predictor_weights_root: Optional[Path] = None
+    if enable_pas:
+        if predictor_weights_dir is not None:
+            predictor_weights_root = _resolve_runtime_path(predictor_weights_dir, repo_root=repo_root)
+        elif predictor_project_root is not None:
+            predictor_project_root_path = _resolve_runtime_path(predictor_project_root, repo_root=repo_root)
+            if predictor_project_root_path is not None:
+                predictor_weights_root = (predictor_project_root_path / "predictor_weights").resolve()
+        else:
+            predictor_weights_root = _default_predictor_weights_root(repo_root)
+
+    if (
+        predictor_weights_root is not None
+        and _is_within_repo_subdir(predictor_weights_root, "predictor_weights", repo_root=repo_root)
+        and not asset_targets["predictor_weights"].is_installed()
+        and "ped-eval" not in requested_bundles
+    ):
+        requested_bundles.append("ped-eval")
+
+    if not requested_bundles:
+        return
+
+    try:
+        ensure_assets(bundles=tuple(requested_bundles), repo_root=repo_root)
+    except AssetSetupError as exc:
+        raise RuntimeError(f"Automatic PED-Eval asset setup failed: {exc}") from exc
+
+
+def _default_dataset_csv(task: str, data_path: Optional[Path] = None, repo_root: Path = REPO_ROOT) -> Path:
+    base = data_path or _default_data_path(repo_root)
     return base / f"{task}.csv"
 
 
-def _default_pdb_dir(data_path: Optional[Path] = None) -> Path:
-    base = data_path or Path("data_design")
+def _default_pdb_dir(data_path: Optional[Path] = None, repo_root: Path = REPO_ROOT) -> Path:
+    base = data_path or _default_data_path(repo_root)
     return base / "pdb"
 
 
-def _default_sites_long_csv(task: str, data_path: Optional[Path] = None) -> Path:
-    base = data_path or Path("data_design")
+def _default_sites_long_csv(task: str, data_path: Optional[Path] = None, repo_root: Path = REPO_ROOT) -> Path:
+    base = data_path or _default_data_path(repo_root)
     return base / "functional_site_annotations" / task / "functional_sites_long.csv"
 
 
@@ -251,6 +372,7 @@ def evaluate_task(
     predictor_weights_dir: Optional[Union[str, Path]] = None,
     predictor_project_root: Optional[Union[str, Path]] = None,
     predictor_batch_size: int = 4,
+    auto_setup_assets: bool = True,
 ) -> EvaluationReport:
     task = str(task).lower()
     if task not in {"opt", "ph"}:
@@ -258,10 +380,22 @@ def evaluate_task(
     if enable_thermo_proxies and task != "opt":
         raise ValueError("Thermophilic composition proxies are only supported for task='opt'.")
 
-    _data_path = Path(data_path) if data_path else None
-    dataset_csv = Path(dataset_csv) if dataset_csv else _default_dataset_csv(task, _data_path)
-    pdb_dir = Path(pdb_dir) if pdb_dir else _default_pdb_dir(_data_path)
-    functional_sites_long_csv = Path(functional_sites_long_csv) if functional_sites_long_csv else _default_sites_long_csv(task, _data_path)
+    result_fasta = _resolve_runtime_path(result_fasta, repo_root=REPO_ROOT)
+    _data_path = _resolve_runtime_path(data_path, repo_root=REPO_ROOT) if data_path else None
+    dataset_csv = _resolve_runtime_path(dataset_csv, repo_root=REPO_ROOT) if dataset_csv else _default_dataset_csv(task, _data_path, repo_root=REPO_ROOT)
+    pdb_dir = _resolve_runtime_path(pdb_dir, repo_root=REPO_ROOT) if pdb_dir else _default_pdb_dir(_data_path, repo_root=REPO_ROOT)
+    functional_sites_long_csv = _resolve_runtime_path(functional_sites_long_csv, repo_root=REPO_ROOT) if functional_sites_long_csv else _default_sites_long_csv(task, _data_path, repo_root=REPO_ROOT)
+
+    _ensure_repo_assets_for_evaluation(
+        dataset_csv=dataset_csv,
+        pdb_dir=pdb_dir,
+        functional_sites_long_csv=functional_sites_long_csv,
+        enable_pas=bool(enable_pas or predictor),
+        predictor_weights_dir=predictor_weights_dir,
+        predictor_project_root=predictor_project_root,
+        auto_setup_assets=auto_setup_assets,
+        repo_root=REPO_ROOT,
+    )
 
     records = load_task_records(dataset_csv, task=task)
     predicted = load_fasta_sequences(result_fasta)

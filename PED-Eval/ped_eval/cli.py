@@ -24,6 +24,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sites-long-csv", default=None, help="Override functional site long CSV path")
 
     parser.add_argument("--output-dir", required=True, help="Output directory")
+    parser.add_argument(
+        "--skip-asset-setup",
+        action="store_true",
+        default=False,
+        help="Skip automatic download/install of missing repo PED-Eval assets when using default repo paths.",
+    )
 
     # Optional ESM-fold structure evaluation
     parser.add_argument(
@@ -110,6 +116,7 @@ def main() -> None:
         predictor_weights_dir=args.predictor_weights_dir,
         predictor_project_root=args.predictor_project_root,
         predictor_batch_size=args.predictor_batch_size,
+        auto_setup_assets=not args.skip_asset_setup,
     )
     output_paths = write_report(report, Path(args.output_dir))
 
