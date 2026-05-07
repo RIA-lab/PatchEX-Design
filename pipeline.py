@@ -1,4 +1,4 @@
-from hydra import initialize, compose
+from hydra import compose, initialize_config_dir
 import direct_evolution.directed_evolution as de
 from MapDiff.model.egnn_pytorch.egnn_net import EGNN_NET
 from MapDiff.model.ipa.ipa_net import IPANetPredictor
@@ -14,6 +14,7 @@ from utils import map_mutated_residues
 from typing import Literal
 import numpy as np
 import argparse
+import copy
 import importlib.util
 import tempfile
 import logging
@@ -24,7 +25,8 @@ import yaml
 import os
 import shutil
 import sys
-from setup_assets import ensure_assets, AssetSetupError
+from setup_assets import ensure_assets, AssetSetupError, build_asset_targets
+from pathlib import Path
 
 
 def load_ped_eval_single_sequence_api():
@@ -54,6 +56,7 @@ def load_ped_eval_single_sequence_api():
 evaluate_single_sequence = load_ped_eval_single_sequence_api()
 # ESMFold metrics are optional; sequence_recovery is always expected.
 PIPELINE_REPORT_METRICS = ("sequence_recovery", "mean_plddt", "tm_score", "rmsd")
+REPO_ROOT = Path(__file__).resolve().parent
 
 
 def resolve_runtime_device(device_preference=None):
@@ -78,6 +81,67 @@ def resolve_runtime_device(device_preference=None):
     return torch.device(device_preference)
 
 
+def resolve_repo_relative_path(path_value, *, repo_root: Path = REPO_ROOT, field_name: str = "path") -> str:
+    if path_value is None or str(path_value).strip() == "":
+        raise ValueError(f"Expected a valid non-empty path for {field_name}.")
+    resolved_path = Path(path_value)
+    if resolved_path.is_absolute():
+        return str(resolved_path)
+    return str((repo_root / resolved_path).resolve())
+
+
+def resolve_runtime_path(path_value, *, repo_root: Path = REPO_ROOT, field_name: str = "path") -> str:
+    if path_value is None or str(path_value).strip() == "":
+        raise ValueError(f"Expected a valid non-empty path for {field_name}.")
+
+    raw_path = Path(path_value).expanduser()
+    if raw_path.is_absolute():
+        return str(raw_path.resolve())
+
+    cwd_candidate = (Path.cwd() / raw_path).resolve()
+    if cwd_candidate.exists():
+        return str(cwd_candidate)
+
+    return str((repo_root / raw_path).resolve())
+
+
+def is_repo_data_design_path(path_value, *, repo_root: Path = REPO_ROOT) -> bool:
+    resolved_path = Path(resolve_runtime_path(path_value, repo_root=repo_root))
+    try:
+        relative_path = resolved_path.relative_to(repo_root)
+    except ValueError:
+        return False
+    return bool(relative_path.parts) and relative_path.parts[0] == 'data_design'
+
+
+def normalize_pipeline_config_paths(config: dict, *, repo_root: Path = REPO_ROOT) -> dict:
+    normalized_config = copy.deepcopy(config)
+
+    ipf_config = normalized_config.setdefault('IPF_config', {})
+    if 'config_path' in ipf_config:
+        ipf_config['config_path'] = resolve_repo_relative_path(
+            ipf_config['config_path'],
+            repo_root=repo_root,
+            field_name='IPF_config.config_path',
+        )
+    if 'output_dir' in ipf_config:
+        ipf_config['output_dir'] = resolve_repo_relative_path(
+            ipf_config['output_dir'],
+            repo_root=repo_root,
+            field_name='IPF_config.output_dir',
+        )
+
+    oracle_model_config = normalized_config.setdefault('oracle_model', {})
+    if 'checkpoint_dir' in oracle_model_config:
+        oracle_model_config['checkpoint_dir'] = resolve_repo_relative_path(
+            oracle_model_config['checkpoint_dir'],
+            repo_root=repo_root,
+            field_name='oracle_model.checkpoint_dir',
+        )
+
+    return normalized_config
+
+
 def cleanup_output_artifacts(output_dir, keep_files=None):
     keep_files = set(keep_files or [])
 
@@ -96,6 +160,32 @@ def cleanup_output_artifacts(output_dir, keep_files=None):
                 os.remove(item_path)
         except FileNotFoundError:
             pass
+
+
+def ensure_runtime_assets(*, pdb_path, ec_pool_path, repo_root: Path = REPO_ROOT) -> None:
+    asset_targets = build_asset_targets(repo_root)
+    requested_bundles: list[str] = []
+
+    pipeline_target_names = ('mapdiff_weight', 'patchex_weight', 'esm150')
+    if any(not asset_targets[target_name].is_installed() for target_name in pipeline_target_names):
+        requested_bundles.append('pipeline')
+
+    needs_repo_data = (
+        is_repo_data_design_path(pdb_path, repo_root=repo_root)
+        or is_repo_data_design_path(ec_pool_path, repo_root=repo_root)
+    )
+    if needs_repo_data and not asset_targets['data_design'].is_installed():
+        requested_bundles.insert(0, 'ped-eval')
+
+    if requested_bundles:
+        ensure_assets(bundles=tuple(requested_bundles), repo_root=repo_root)
+
+
+def require_existing_file(path_value, *, description: str) -> str:
+    resolved_path = Path(path_value)
+    if not resolved_path.is_file():
+        raise FileNotFoundError(f"{description} not found: {resolved_path}")
+    return str(resolved_path)
 
 
 @dataclass
@@ -154,11 +244,35 @@ class ConfigDe:
 
 
 class IPFPipeline:
-    def __init__(self, config_path="MapDiff/conf", config_name="inference", output_dir="PipelineResults", device=None):
-        with initialize(version_base=None, config_path=config_path):
+    def __init__(
+        self,
+        config_path="MapDiff/conf",
+        config_name="inference",
+        output_dir="PipelineResults",
+        device=None,
+        repo_root=None,
+    ):
+        self.repo_root = Path(repo_root or REPO_ROOT).resolve()
+        resolved_config_path = resolve_repo_relative_path(
+            config_path,
+            repo_root=self.repo_root,
+            field_name='IPF_config.config_path',
+        )
+
+        with initialize_config_dir(version_base=None, config_dir=resolved_config_path):
             self.cfg = compose(config_name=config_name)
 
         self.device = resolve_runtime_device(device)
+        marginal_dist_path = resolve_repo_relative_path(
+            self.cfg.dataset.marginal_train_dir,
+            repo_root=self.repo_root,
+            field_name='dataset.marginal_train_dir',
+        )
+        test_model_path = resolve_repo_relative_path(
+            self.cfg.test_model.path,
+            repo_root=self.repo_root,
+            field_name='test_model.path',
+        )
 
         # load trained model
         egnn = EGNN_NET(input_feat_dim=self.cfg.model.input_feat_dim, hidden_channels=self.cfg.model.hidden_dim,
@@ -175,10 +289,10 @@ class IPFPipeline:
                                 noise_type=self.cfg.diffusion.noise_type, sample_method=self.cfg.diffusion.sample_method,
                                 min_mask_ratio=self.cfg.mask_prior.min_mask_ratio,
                                 dev_mask_ratio=self.cfg.mask_prior.dev_mask_ratio,
-                                marginal_dist_path=self.cfg.dataset.marginal_train_dir).to(self.device)
+                                marginal_dist_path=marginal_dist_path).to(self.device)
 
 
-        checkpoint = torch.load(self.cfg.test_model.path, map_location='cpu')
+        checkpoint = torch.load(test_model_path, map_location='cpu')
         self.model.load_state_dict(checkpoint['model'], strict=True)
         self.model.eval()
         enable_dropout(self.model)
@@ -230,19 +344,30 @@ class IPFPipeline:
 
 class Pipeline:
     def __init__(self, config):
-        self.config = config
-        self.task = config['task']
-        self.device = resolve_runtime_device(config.get('device', config.get('de_config', {}).get('device')))
-        self.output_dir = config['IPF_config']['output_dir']
-        ipf_config = dict(config['IPF_config'])
+        self.config = normalize_pipeline_config_paths(config)
+        self.task = self.config['task']
+        self.device = resolve_runtime_device(
+            self.config.get('device', self.config.get('de_config', {}).get('device'))
+        )
+        self.output_dir = self.config['IPF_config']['output_dir']
+        ipf_config = copy.deepcopy(self.config['IPF_config'])
         ipf_config.setdefault('device', str(self.device))
+        ipf_config.setdefault('repo_root', str(REPO_ROOT))
         self.ipf_pipeline = IPFPipeline(**ipf_config)
         self.config.setdefault('de_config', {})['device'] = str(self.device)
-        oracle_model_config = dict(config['oracle_model'])
+        oracle_model_config = copy.deepcopy(self.config['oracle_model'])
         oracle_model_config.setdefault('device', str(self.device))
         self.oracle_model = InferenceModel(**oracle_model_config)
 
     def __call__(self, pdb_file, ec_pool, target_value):
+        pdb_file = require_existing_file(
+            resolve_runtime_path(pdb_file, repo_root=REPO_ROOT, field_name='pdb_file'),
+            description='PDB file',
+        )
+        ec_pool = require_existing_file(
+            resolve_runtime_path(ec_pool, repo_root=REPO_ROOT, field_name='ec_pool'),
+            description='EC pool file',
+        )
         pdb_accession = os.path.basename(pdb_file).split(".")[0]
         accession = pdb_accession
         ipf_res = os.path.join(self.output_dir, accession)
@@ -396,16 +521,32 @@ if __name__ == "__main__":
     parser.add_argument(
         '--skip-asset-setup',
         action='store_true',
-        help='skip automatic download/install of pipeline weights before execution',
+        help='skip automatic download/install of missing pipeline weights and repo data assets before execution',
     )
     args = parser.parse_args()
 
+    args.config = resolve_runtime_path(args.config, repo_root=REPO_ROOT, field_name='config')
+    args.pdb = resolve_runtime_path(args.pdb, repo_root=REPO_ROOT, field_name='pdb')
+    args.ec_pool = resolve_runtime_path(args.ec_pool, repo_root=REPO_ROOT, field_name='ec_pool')
+
     if not args.skip_asset_setup:
         try:
-            ensure_assets(bundles=('pipeline',))
+            ensure_runtime_assets(
+                pdb_path=args.pdb,
+                ec_pool_path=args.ec_pool,
+                repo_root=REPO_ROOT,
+            )
         except AssetSetupError as exc:
-            print(f'Automatic pipeline asset setup failed: {exc}', file=sys.stderr)
+            print(f'Automatic asset setup failed: {exc}', file=sys.stderr)
             sys.exit(1)
+
+    try:
+        args.config = require_existing_file(args.config, description='Config file')
+        args.pdb = require_existing_file(args.pdb, description='PDB file')
+        args.ec_pool = require_existing_file(args.ec_pool, description='EC pool file')
+    except FileNotFoundError as exc:
+        print(f'[ERROR] {exc}', file=sys.stderr)
+        sys.exit(1)
 
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
