@@ -1,0 +1,151 @@
+Metadata-Version: 2.4
+Name: PED-Eval
+Version: 0.1.0
+Summary: Evaluate designed enzyme sequences for opt/ph tasks
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.23
+Requires-Dist: pandas>=1.5
+Requires-Dist: biopython>=1.81
+Provides-Extra: predictors
+Requires-Dist: torch>=2.0; extra == "predictors"
+Requires-Dist: fair-esm>=2.0.0; extra == "predictors"
+Requires-Dist: scikit-learn>=1.2; extra == "predictors"
+Requires-Dist: joblib>=1.2; extra == "predictors"
+Requires-Dist: pyyaml>=6.0; extra == "predictors"
+Requires-Dist: safetensors>=0.4; extra == "predictors"
+Requires-Dist: transformers>=4.35; extra == "predictors"
+Provides-Extra: structure
+Requires-Dist: torch>=2.0; extra == "structure"
+Requires-Dist: transformers>=4.35; extra == "structure"
+
+# PED-Eval v1
+
+PED-Eval evaluates designed enzyme sequences for `opt` and `ph` tasks using:
+
+- dataset metadata: `data_design/public/<task>.csv`
+- native structures: `data_design/public/pdb/<accession>.pdb`
+- functional annotations: `data_design/public/functional_site_annotations/<task>/functional_sites_long.csv`
+- designed sequences: `RESULT/<task>/curated_<task>.fasta`
+
+## Metrics (v1)
+
+- `NSSR` (BLOSUM62 score > 0)
+- `NSSR_BLOSUM90/80/62/50/45` breakdown
+- `recovery_rate` (exact amino-acid identity ratio)
+- `recovery_by_secondary_structure`
+- `E-FSR` / `C-FSR` (overall functional sites)
+- `catalytic_site_recovery` (`E-FSR`, `C-FSR`)
+- `binding_site_recovery` (`E-FSR`, `C-FSR`)
+- `nan_explanations` for undefined metrics
+
+Optional metrics:
+
+- `mean_plddt`, `tm_score`, `rmsd` (with `--use-esmfold`)
+- PAS-style metrics (with `--enable-pas` + `--predictor`):
+  - `PAS`
+  - `constraint_satisfied` / aggregate `constraint_satisfaction_rate`
+  - `absolute_error` / aggregate `MAE`
+  - aggregate `Pearson_correlation`
+- Thermophilic composition proxies for `opt` (with `--enable-thermo-proxies`):
+  - `IVYWREL`
+  - aggregate `mean_IVYWREL`
+  - `summary.json` metadata for IVYWREL-vs-target analysis (correlations + temperature-bin aggregates)
+
+## Install
+
+```bash
+pip install -e ~/EnzymeGPT/PED-Eval
+```
+
+## CLI
+
+```bash
+ped-eval --task opt --result-fasta ~/EnzymeGPT/RESULT/opt/curated_opt.fasta --output-dir ~/EnzymeGPT/PED-Eval/outputs/opt
+ped-eval --task ph --result-fasta ~/EnzymeGPT/RESULT/ph/curated_ph.fasta --output-dir ~/EnzymeGPT/PED-Eval/outputs/ph
+
+# Use --data-path to set a custom base dataset folder
+ped-eval --task opt --result-fasta ~/EnzymeGPT/RESULT/opt/curated_opt.fasta --data-path ~/EnzymeGPT/data_design/public --output-dir ~/EnzymeGPT/PED-Eval/outputs/opt
+
+# Optional PAS metrics for opt (weights-only workflow)
+ped-eval --task opt --result-fasta ~/EnzymeGPT/RESULT/opt/curated_opt.fasta --output-dir ~/EnzymeGPT/PED-Eval/outputs/opt_pas --enable-pas --predictor Seq2Topt --predictor-project-root ~/EnzymeGPT
+
+# Optional PAS metrics for ph
+ped-eval --task ph --result-fasta ~/EnzymeGPT/RESULT/ph/curated_ph.fasta --output-dir ~/EnzymeGPT/PED-Eval/outputs/ph_pas --enable-pas --predictor EpHod --predictor-project-root ~/EnzymeGPT
+
+# Optional thermophilic composition proxy for opt
+ped-eval --task opt --result-fasta ~/EnzymeGPT/RESULT/opt/curated_opt.fasta --output-dir ~/EnzymeGPT/PED-Eval/outputs/opt_thermo --enable-thermo-proxies
+```
+
+Equivalent invocations:
+
+```bash
+python -m ped_eval --task opt --result-fasta ~/EnzymeGPT/RESULT/opt/curated_opt.fasta --output-dir ~/EnzymeGPT/PED-Eval/outputs/opt
+python ~/EnzymeGPT/PED-Eval/run_ped_eval.py --task opt --result-fasta ~/EnzymeGPT/RESULT/opt/curated_opt.fasta --output-dir ~/EnzymeGPT/PED-Eval/outputs/opt
+```
+
+Optional path overrides:
+
+```bash
+ped-eval --task opt --result-fasta ~/EnzymeGPT/RESULT/opt/curated_opt.fasta --dataset-csv ~/EnzymeGPT/data_design/public/opt.csv --pdb-dir ~/EnzymeGPT/data_design/public/pdb --sites-long-csv ~/EnzymeGPT/data_design/public/functional_site_annotations/opt/functional_sites_long.csv --output-dir ~/EnzymeGPT/PED-Eval/outputs/opt
+```
+
+Outputs:
+
+- `per_accession.jsonl` (full nested objects)
+- `per_accession.csv` (flattened table)
+- `summary.json` (aggregate means + success/error counts)
+
+## PAS predictors
+
+For `--task opt`:
+
+- `Seq2Topt`
+- `PatchEX`
+- `PatchET`
+
+For `--task ph`:
+
+- `Seq2pHopt`
+- `PatchEX`
+- `EpHod`
+
+Notes:
+
+- PAS defaults: `sigma=4.0` for `opt`, `sigma=0.3` for `ph`.
+- Constraint satisfaction follows legacy PAS style: `round(PAS, 2) > 0`.
+- Use `--pas-sigma` to control PAS/CSR sensitivity.
+- `--enable-thermo-proxies` is optional and currently adds the sequence-composition proxy `IVYWREL` for `opt` only.
+- When enabled for `opt`, `summary.json` also includes `IVYWREL_analysis` with no-plot metadata: target correlations and mean/std/count by target temperature bin.
+- Predictor checkpoints are loaded from `--predictor-weights-dir` (default: `./predictor_weights`).
+- Expected predictor layout under `predictor_weights/` includes subfolders such as `Seq2Topt/code/`, `patchex_weight/<task>/`, `patchet_pretrain_weight/opt/`, and `Ephod/`.
+- Predictors are optional and lazily imported; if dependencies are missing, only PAS mode fails.
+
+## Python API
+
+```python
+from ped_eval import evaluate_task
+
+report = evaluate_task(
+    task="opt",
+    result_fasta="/home/yourname/EnzymeGPT/RESULT/opt/curated_opt.fasta",
+    dataset_csv="/home/yourname/EnzymeGPT/data_design/public/opt.csv",
+    pdb_dir="/home/yourname/EnzymeGPT/data_design/public/pdb",
+    functional_sites_long_csv="/home/yourname/EnzymeGPT/data_design/public/functional_site_annotations/opt/functional_sites_long.csv",
+    enable_pas=True,
+    enable_thermo_proxies=True,
+    predictor="Seq2Topt",
+    predictor_project_root="/home/yourname/EnzymeGPT",
+)
+
+print(report.summary)
+print(report.results[0])
+```
+
+## Run tests
+
+```bash
+python -m unittest discover -s ~/EnzymeGPT/PED-Eval/tests -p "test_*.py"
+```
+
+
