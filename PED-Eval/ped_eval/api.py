@@ -88,7 +88,7 @@ def _load_setup_assets_api(repo_root: Path = REPO_ROOT):
         from setup_assets import AssetSetupError, build_asset_targets, ensure_assets
 
         return ensure_assets, AssetSetupError, build_asset_targets
-    except ImportError:
+    except (ImportError, SyntaxError):
         setup_assets_path = repo_root / "setup_assets.py"
         if not setup_assets_path.exists():
             return None
@@ -99,7 +99,10 @@ def _load_setup_assets_api(repo_root: Path = REPO_ROOT):
 
         module = importlib.util.module_from_spec(spec)
         sys.modules.setdefault("patchex_setup_assets", module)
-        spec.loader.exec_module(module)
+        try:
+            spec.loader.exec_module(module)
+        except (ImportError, SyntaxError):
+            return None
         return module.ensure_assets, module.AssetSetupError, module.build_asset_targets
 
 

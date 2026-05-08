@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional
+from typing import Dict, List, Mapping, Optional, Union
 
 
 _ALLOWED_BY_TASK = {
@@ -509,8 +509,8 @@ def _default_project_root() -> Path:
 def build_predictor(
     task: str,
     predictor_name: str,
-    weights_dir: Optional[str | Path] = None,
-    project_root: Optional[str | Path] = None,
+    weights_dir: Optional[Union[str, Path]] = None,
+    project_root: Optional[Union[str, Path]] = None,
     batch_size: int = 4,
 ) -> BasePredictor:
     validate_predictor_for_task(task, predictor_name)

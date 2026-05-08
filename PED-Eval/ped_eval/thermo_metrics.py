@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
-from typing import AbstractSet
+from typing import AbstractSet, Any, Optional
 
 import pandas as pd
 
@@ -28,7 +27,7 @@ def compute_ivywrel(sequence: str) -> float:
     return compute_residue_fraction(sequence, IVYWREL_RESIDUES)
 
 
-def _safe_float(value: Any) -> float | None:
+def _safe_float(value: Any) -> Optional[float]:
     if value is None or pd.isna(value):
         return None
     return float(value)

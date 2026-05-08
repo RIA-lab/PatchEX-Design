@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Optional, Set, Tuple
+from typing import Dict, Iterable, Mapping, Optional, Set, Tuple, Union
 
 import pandas as pd
 
@@ -48,7 +48,7 @@ def normalize_sequence(sequence: str) -> str:
     return str(sequence).strip().upper().replace("-", "")
 
 
-def load_fasta_sequences(fasta_path: str | Path) -> Dict[str, str]:
+def load_fasta_sequences(fasta_path: Union[str, Path]) -> Dict[str, str]:
     fasta_path = Path(fasta_path)
     sequences: Dict[str, str] = {}
     current_id: Optional[str] = None
@@ -97,7 +97,7 @@ def _detect_target_column(columns: Iterable[str], task: Optional[str]) -> Option
     return None
 
 
-def load_task_records(dataset_csv: str | Path, task: Optional[str] = None) -> Dict[str, TaskRecord]:
+def load_task_records(dataset_csv: Union[str, Path], task: Optional[str] = None) -> Dict[str, TaskRecord]:
     df = pd.read_csv(dataset_csv)
     required = {"accession", "sec_structure"}
     missing = required.difference(df.columns)
@@ -123,7 +123,7 @@ def site_role_from_description(desc: str) -> str:
     return "other"
 
 
-def load_functional_annotations(functional_sites_long_csv: str | Path) -> Tuple[Dict[str, Set[int]], Dict[str, Dict[int, str]]]:
+def load_functional_annotations(functional_sites_long_csv: Union[str, Path]) -> Tuple[Dict[str, Set[int]], Dict[str, Dict[int, str]]]:
     df = pd.read_csv(functional_sites_long_csv)
     required = {"accession", "pos", "description"}
     missing = required.difference(df.columns)
@@ -195,7 +195,7 @@ def _parse_atom_fallback(pdb_lines: Iterable[str], chain_id: Optional[str]) -> s
     return "".join(residues)
 
 
-def load_native_sequence_from_pdb(pdb_path: str | Path, chain_id: Optional[str] = None) -> str:
+def load_native_sequence_from_pdb(pdb_path: Union[str, Path], chain_id: Optional[str] = None) -> str:
     pdb_path = Path(pdb_path)
     if not pdb_path.exists():
         raise FileNotFoundError(str(pdb_path))
