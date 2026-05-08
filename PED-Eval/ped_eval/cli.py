@@ -117,6 +117,7 @@ def main() -> None:
         predictor_project_root=args.predictor_project_root,
         predictor_batch_size=args.predictor_batch_size,
         auto_setup_assets=not args.skip_asset_setup,
+        show_progress=True,
     )
     output_paths = write_report(report, Path(args.output_dir))
 

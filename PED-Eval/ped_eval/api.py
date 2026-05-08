@@ -42,6 +42,42 @@ _ESMFOLD_EVALUATOR_CACHE: Dict[tuple[str, str], Any] = {}
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+class _EvaluationProgressBar:
+    def __init__(self, total: int, *, stream=None) -> None:
+        self.total = max(total, 0)
+        self.stream = stream or sys.stderr
+        self.width = 32
+        self.is_tty = bool(getattr(self.stream, "isatty", lambda: False)())
+        self._last_line = ""
+
+    def update(self, completed: int, accession: str) -> None:
+        line = self._render(completed, accession)
+        if line == self._last_line:
+            return
+        self._last_line = line
+        if self.is_tty:
+            self.stream.write(f"\r{line}")
+        else:
+            self.stream.write(f"{line}\n")
+        self.stream.flush()
+
+    def close(self) -> None:
+        if self.is_tty and self.total > 0:
+            self.stream.write("\n")
+            self.stream.flush()
+
+    def _render(self, completed: int, accession: str) -> str:
+        total = max(self.total, 1)
+        bounded_completed = min(max(completed, 0), total)
+        percent = int((bounded_completed / total) * 100)
+        filled = min(self.width, int(self.width * bounded_completed / total))
+        bar = "#" * filled + "-" * (self.width - filled)
+        return (
+            f"[PED-Eval] Progress: [{bar}] {bounded_completed}/{self.total} "
+            f"({percent:3d}%) current={accession}"
+        )
+
+
 def _resolve_runtime_path(path_value: Optional[Union[str, Path]], *, repo_root: Path = REPO_ROOT) -> Optional[Path]:
     if path_value is None:
         return None
@@ -376,6 +412,7 @@ def evaluate_task(
     predictor_project_root: Optional[Union[str, Path]] = None,
     predictor_batch_size: int = 4,
     auto_setup_assets: bool = True,
+    show_progress: bool = False,
 ) -> EvaluationReport:
     task = str(task).lower()
     if task not in {"opt", "ph"}:
@@ -433,6 +470,8 @@ def evaluate_task(
         esmfold_evaluator = ESMFoldEvaluator(pdb_dir=pdb_dir, output_dir=fold_out)
 
     results: List[Dict[str, Any]] = []
+    progress_bar = _EvaluationProgressBar(len(predicted)) if show_progress and len(predicted) > 0 else None
+    completed = 0
 
     for accession, predicted_sequence in predicted.items():
         try:
@@ -521,6 +560,13 @@ def evaluate_task(
                 "status": "error",
                 "error": f"{type(exc).__name__}: {exc}",
             })
+        finally:
+            completed += 1
+            if progress_bar is not None:
+                progress_bar.update(completed, accession)
+
+    if progress_bar is not None:
+        progress_bar.close()
 
     summary = _build_summary(task, results)
     if pas_enabled:
