@@ -11,7 +11,7 @@ import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Optional, Set, Union
 
 
 ZENODO_RECORDS = {
@@ -78,7 +78,7 @@ class AssetTarget:
     destination: Path
     kind: str
     validator: Callable[[Path], bool]
-    finder: Callable[[Path], Path | None]
+    finder: Callable[[Path], Optional[Path]]
 
     def is_installed(self) -> bool:
         return self.validator(self.destination)
@@ -113,7 +113,7 @@ def _existing_file(path: Path) -> bool:
     return path.is_file()
 
 
-def _find_named_path(stage_root: Path, name: str, *, kind: str = "dir", exclude_parts: set[str] | None = None) -> Path | None:
+def _find_named_path(stage_root: Path, name: str, *, kind: str = "dir", exclude_parts: Optional[Set[str]] = None) -> Optional[Path]:
     exclude_parts = exclude_parts or set()
     matches: list[Path] = []
     for path in stage_root.rglob(name):
@@ -129,7 +129,7 @@ def _find_named_path(stage_root: Path, name: str, *, kind: str = "dir", exclude_
     return matches[0]
 
 
-def _find_parent_with_children(stage_root: Path, required_children: set[str], *, exclude_parts: set[str] | None = None) -> Path | None:
+def _find_parent_with_children(stage_root: Path, required_children: Set[str], *, exclude_parts: Optional[Set[str]] = None) -> Optional[Path]:
     exclude_parts = exclude_parts or set()
     candidates: list[Path] = []
     for path in stage_root.rglob("*"):
@@ -229,7 +229,7 @@ def _fetch_zenodo_record_files(
     download_dir: Path,
     *,
     quiet: bool = False,
-    target_names: set[str] | None = None,
+    target_names: Optional[Set[str]] = None,
 ) -> list[Path]:
     record_url = f"https://zenodo.org/api/records/{record_id}"
     if not quiet:
@@ -325,9 +325,9 @@ def _resolve_missing_targets(targets: dict[str, AssetTarget], bundles: Iterable[
 
 
 def ensure_assets(
-    bundles: Iterable[str] | None = None,
+    bundles: Optional[Iterable[str]] = None,
     *,
-    repo_root: str | Path | None = None,
+    repo_root: Optional[Union[str, Path]] = None,
     force: bool = False,
     quiet: bool = False,
 ) -> None:
