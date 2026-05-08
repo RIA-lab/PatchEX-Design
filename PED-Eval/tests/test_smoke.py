@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import tempfile
 import unittest
 import importlib
+import sys
 from pathlib import Path
 import importlib.util
 from unittest.mock import patch
@@ -12,9 +15,19 @@ _SPEC = importlib.util.spec_from_file_location("ped_eval", _PKG_ROOT / "ped_eval
 if _SPEC is None or _SPEC.loader is None:
     raise RuntimeError("Failed to load ped_eval package for tests")
 _MODULE = importlib.util.module_from_spec(_SPEC)
+sys.modules.setdefault("ped_eval", _MODULE)
 _SPEC.loader.exec_module(_MODULE)
 evaluate_task = _MODULE.evaluate_task
 build_predictor = importlib.import_module("ped_eval.predictors").build_predictor
+_SETUP_SPEC = importlib.util.spec_from_file_location(
+    "patchex_setup_assets_test",
+    _PKG_ROOT.parent / "setup_assets.py",
+)
+if _SETUP_SPEC is None or _SETUP_SPEC.loader is None:
+    raise RuntimeError("Failed to load setup_assets module for tests")
+_SETUP_MODULE = importlib.util.module_from_spec(_SETUP_SPEC)
+sys.modules.setdefault("patchex_setup_assets_test", _SETUP_MODULE)
+_SETUP_SPEC.loader.exec_module(_SETUP_MODULE)
 
 
 class TestPedEvalSmoke(unittest.TestCase):
@@ -337,6 +350,84 @@ class TestPedEvalSmoke(unittest.TestCase):
             self.assertEqual(patchex_ctor.call_args.kwargs["model_config_path"], patch_cfg.resolve())
             self.assertEqual(patchex_ctor.call_args.kwargs["weight_path"], patch_weight.resolve())
             self.assertEqual(patchex_ctor.call_args.kwargs["project_root"], repo_root.resolve())
+
+    def test_evaluate_task_progress_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_dir = root / "data_design" / "public"
+            pdb_dir = data_dir / "pdb"
+            ann_dir = data_dir / "functional_site_annotations" / "opt"
+            result_dir = root / "RESULT" / "opt"
+
+            pdb_dir.mkdir(parents=True)
+            ann_dir.mkdir(parents=True)
+            result_dir.mkdir(parents=True)
+
+            (data_dir / "opt.csv").write_text(
+                "accession,ec,temperature_optimum,sec_structure\n"
+                "ACC1,1.1.1.1,37,HHH\n"
+                "ACC2,1.1.1.2,42,HHH\n",
+                encoding="utf-8",
+            )
+            (ann_dir / "functional_sites_long.csv").write_text(
+                "accession,pos,residue,description\n",
+                encoding="utf-8",
+            )
+            for accession in ("ACC1", "ACC2"):
+                (pdb_dir / f"{accession}.pdb").write_text(
+                    "SEQRES   1 A    3  ALA CYS ASP\nEND\n",
+                    encoding="utf-8",
+                )
+            (result_dir / "curated_opt.fasta").write_text(
+                ">ACC1\nACD\n"
+                ">ACC2\nACD\n",
+                encoding="utf-8",
+            )
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                report = evaluate_task(
+                    task="opt",
+                    result_fasta=result_dir / "curated_opt.fasta",
+                    dataset_csv=data_dir / "opt.csv",
+                    pdb_dir=pdb_dir,
+                    functional_sites_long_csv=ann_dir / "functional_sites_long.csv",
+                    auto_setup_assets=False,
+                    show_progress=True,
+                )
+
+            self.assertEqual(report.summary["n_success"], 2)
+            progress_output = stderr.getvalue()
+            self.assertIn("[PED-Eval] Progress:", progress_output)
+            self.assertIn("2/2", progress_output)
+            self.assertIn("current=ACC2", progress_output)
+
+    def test_download_progress_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "asset.bin"
+            payload = b"x" * 4096
+
+            class _FakeResponse(io.BytesIO):
+                def __init__(self, data: bytes) -> None:
+                    super().__init__(data)
+                    self.headers = {"Content-Length": str(len(data))}
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    self.close()
+                    return False
+
+            stderr = io.StringIO()
+            with patch.object(_SETUP_MODULE.urllib.request, "urlopen", return_value=_FakeResponse(payload)):
+                with contextlib.redirect_stderr(stderr):
+                    result = _SETUP_MODULE._download_file("https://example.com/asset.bin", destination)
+
+            self.assertEqual(result.read_bytes(), payload)
+            progress_output = stderr.getvalue()
+            self.assertIn("Downloading asset.bin", progress_output)
+            self.assertIn("100%", progress_output)
 
 
 if __name__ == "__main__":
