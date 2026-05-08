@@ -1,4 +1,4 @@
-name: mapdiff
+name: patchex-design
 channels:
   - https://repo.anaconda.com/pkgs/main
   - https://repo.anaconda.com/pkgs/r
@@ -11,4 +11,3 @@ dependencies:
   - lmdb
   - python-lmdb
   - tmalign
-prefix: /etc/disks/omniai/data/ziqi/anaconda3/envs/mapdiff
