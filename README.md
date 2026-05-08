@@ -43,10 +43,15 @@ Recommended environment:
 - TMalign on `PATH` for structure-comparison metrics
 - Bash, WSL, Git Bash, or Linux/macOS shell for `run_pipeline.sh`
 
-Install the main pipeline dependencies:
+## 🔧 Environment Setup (Recommended)
+
+We provide a Conda environment file to ensure reproducibility across systems.
+
+### 1. Create the environment
 
 ```bash
-pip install -r requirements.txt
+conda env create -f environment.yml
+conda activate patchex-design
 ```
 
 Install PED-Eval:
