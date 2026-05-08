@@ -275,23 +275,22 @@ def _fetch_zenodo_record_files(
 
 def _stage_downloads(downloaded_files: Iterable[Path], stage_root: Path, *, quiet: bool = False) -> None:
     for file_path in downloaded_files:
-        target_dir = stage_root / file_path.stem
-        target_dir.mkdir(parents=True, exist_ok=True)
         if zipfile.is_zipfile(file_path):
             if not quiet:
                 print(f"[INFO] Extracting zip archive {file_path.name}")
             with zipfile.ZipFile(file_path) as archive:
-                archive.extractall(target_dir)
+                archive.extractall(stage_root)  # ← FIX: extract directly
             continue
 
         if tarfile.is_tarfile(file_path):
             if not quiet:
                 print(f"[INFO] Extracting tar archive {file_path.name}")
             with tarfile.open(file_path) as archive:
-                archive.extractall(target_dir)
+                archive.extractall(stage_root)  # ← FIX
             continue
 
-        shutil.copy2(file_path, target_dir / file_path.name)
+        # fallback for non-archive files
+        shutil.copy2(file_path, stage_root / file_path.name)
 
 
 def _install_directory(source: Path, destination: Path, *, force: bool = False, quiet: bool = False) -> None:
