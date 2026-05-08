@@ -65,10 +65,75 @@ REQUIRED_ESM150_PATHS = {
     "tokenizer_config.json",
     "vocab.txt",
 }
+DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 
 
 class AssetSetupError(RuntimeError):
     pass
+
+
+def _format_size(num_bytes: int) -> str:
+    size = float(max(num_bytes, 0))
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024.0 or unit == "TB":
+            if unit == "B":
+                return f"{int(size)}{unit}"
+            return f"{size:.1f}{unit}"
+        size /= 1024.0
+    return f"{size:.1f}TB"
+
+
+class _ProgressBar:
+    def __init__(self, label: str, *, total: Optional[int] = None, stream=None) -> None:
+        self.label = label
+        self.total = total if total and total > 0 else None
+        self.stream = stream or sys.stderr
+        self.width = 32
+        self.is_tty = bool(getattr(self.stream, "isatty", lambda: False)())
+        self._last_percent = -1
+        self._last_text = ""
+
+    def update(self, completed: int) -> None:
+        text = self._render(completed)
+        if text == self._last_text:
+            return
+        self._last_text = text
+        if self.is_tty:
+            self.stream.write(f"\r{text}")
+        else:
+            self.stream.write(f"{text}\n")
+        self.stream.flush()
+
+    def close(self, completed: int) -> None:
+        text = self._render(completed, final=True)
+        if text != self._last_text:
+            if self.is_tty:
+                self.stream.write(f"\r{text}")
+            else:
+                self.stream.write(f"{text}\n")
+            self.stream.flush()
+        if self.is_tty:
+            self.stream.write("\n")
+            self.stream.flush()
+
+    def _render(self, completed: int, *, final: bool = False) -> str:
+        completed = max(completed, 0)
+        if self.total is None:
+            return f"[INFO] {self.label}: {_format_size(completed)}"
+
+        ratio = min(completed / self.total, 1.0)
+        percent = int(ratio * 100)
+        if not self.is_tty and not final and percent < 100:
+            percent_bucket = percent // 10
+            if percent_bucket == self._last_percent:
+                return self._last_text
+            self._last_percent = percent_bucket
+        filled = min(self.width, int(self.width * ratio))
+        bar = "#" * filled + "-" * (self.width - filled)
+        return (
+            f"[INFO] {self.label}: [{bar}] {percent:3d}% "
+            f"({_format_size(completed)}/{_format_size(self.total)})"
+        )
 
 
 @dataclass(frozen=True)
@@ -201,7 +266,26 @@ def _download_file(url: str, destination: Path, *, quiet: bool = False) -> Path:
         print(f"[INFO] Downloading {url} -> {destination}")
     try:
         with urllib.request.urlopen(url) as response, destination.open("wb") as output_file:
-            shutil.copyfileobj(response, output_file)
+            total_size: Optional[int] = None
+            content_length = response.headers.get("Content-Length")
+            if content_length:
+                try:
+                    total_size = int(content_length)
+                except ValueError:
+                    total_size = None
+
+            progress = None if quiet else _ProgressBar(f"Downloading {destination.name}", total=total_size)
+            bytes_written = 0
+            while True:
+                chunk = response.read(DOWNLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                output_file.write(chunk)
+                bytes_written += len(chunk)
+                if progress is not None:
+                    progress.update(bytes_written)
+            if progress is not None:
+                progress.close(bytes_written)
     except urllib.error.URLError as exc:
         raise AssetSetupError(f"Failed to download {url}: {exc}") from exc
     return destination
