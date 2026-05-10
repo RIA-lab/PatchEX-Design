@@ -153,7 +153,13 @@ class Seq2RegressorPredictor(BasePredictor):
 
 
 class PatchInferencePredictor(BasePredictor):
-    def __init__(self, model_config_path: Path, weight_path: Path, project_root: Path) -> None:
+    def __init__(
+        self,
+        model_config_path: Path,
+        weight_path: Path,
+        project_root: Path,
+        batch_size: int = 4,  # FIX: accept batch_size
+    ) -> None:
         try:
             import torch
             import yaml
@@ -207,6 +213,7 @@ class PatchInferencePredictor(BasePredictor):
             self.model.inference = True
         self.model.eval()
         self._torch = torch
+        self.batch_size = int(batch_size)  # FIX: store batch_size
 
     @staticmethod
     def _normalize_config_paths(config: dict, project_root: Path) -> dict:
@@ -243,17 +250,18 @@ class PatchInferencePredictor(BasePredictor):
         if not valid_items:
             return out
 
-        batch = self.collator(valid_items)
-        batch = {k: v.to(self.device) for k, v in batch.items()}
-        with self._torch.no_grad():
-            outputs = self.model(**batch)
+        # FIX: process in chunks instead of one giant batch
+        for start in range(0, len(valid_items), self.batch_size):
+            chunk = valid_items[start : start + self.batch_size]
 
-        for i, item in enumerate(valid_items):
-            pred = outputs.pred[i]
-            if hasattr(pred, "item"):
-                out[item.accession] = float(pred.item())
-            else:
-                out[item.accession] = float(pred)
+            batch = self.collator(chunk)
+            batch = {k: v.to(self.device) for k, v in batch.items()}
+            with self._torch.no_grad():
+                outputs = self.model(**batch)
+
+            for i, item in enumerate(chunk):
+                pred = outputs.pred[i]
+                out[item.accession] = float(pred.item() if hasattr(pred, "item") else pred)
 
         return out
 
@@ -411,7 +419,7 @@ class EpHodPredictor(BasePredictor):
         if not valid:
             return out
 
-        # EpHod pooling in the original code expects batch size 1 for reproducible behavior.
+        # EpHod: already batch_size=1 for reproducibility; no change needed.
         for acc, seq in valid:
             pred = self.model.predict([acc], [seq])
             values = pred.get("ensemble_pred", [])
@@ -429,7 +437,13 @@ class PatchETPretrainedPredictor(BasePredictor):
     patchet_pretrain_weight/model_config.yaml.
     """
 
-    def __init__(self, model_config_path: Path, weight_path: Path, project_root: Path) -> None:
+    def __init__(
+        self,
+        model_config_path: Path,
+        weight_path: Path,
+        project_root: Path,
+        batch_size: int = 4,  # FIX: accept batch_size
+    ) -> None:
         try:
             import torch
             import yaml
@@ -470,8 +484,9 @@ class PatchETPretrainedPredictor(BasePredictor):
 
         self._torch = torch
         self.tokenizer = EsmTokenizer.from_pretrained(config["pretrain_model"])
+        self.batch_size = int(batch_size)  # FIX: store batch_size
 
-    def predict_many(self, sequences: Mapping[str, str], batch_size: int = 4) -> Dict[str, Optional[float]]:
+    def predict_many(self, sequences: Mapping[str, str]) -> Dict[str, Optional[float]]:
         ids = list(sequences.keys())
         seqs = [str(sequences[k]).strip().upper() for k in ids]
         out: Dict[str, Optional[float]] = {k: None for k in ids}
@@ -480,14 +495,15 @@ class PatchETPretrainedPredictor(BasePredictor):
         if not valid:
             return out
 
-        for start in range(0, len(valid), batch_size):
-            chunk = valid[start : start + batch_size]
+        # FIX: process in chunks; pad only to local batch maximum, not global max_length
+        for start in range(0, len(valid), self.batch_size):
+            chunk = valid[start : start + self.batch_size]
             chunk_seqs = [seq for _, seq in chunk]
 
             inputs = self.tokenizer(
                 chunk_seqs,
                 return_tensors="pt",
-                padding=True,          # pad to longest in THIS batch only
+                padding=True,       # FIX: pad to longest in THIS chunk only
                 truncation=True,
                 max_length=1000,
             )
@@ -555,7 +571,13 @@ def build_predictor(
         weight_path = _first_existing_path(
             weights_root / "patchex_weight" / str(task).lower() / "model.safetensors",
         )
-        return PatchInferencePredictor(model_config_path=model_config_path, weight_path=weight_path, project_root=repo_root)
+        # FIX: pass batch_size through
+        return PatchInferencePredictor(
+            model_config_path=model_config_path,
+            weight_path=weight_path,
+            project_root=repo_root,
+            batch_size=batch_size,
+        )
 
     if predictor_name == "PatchET":
         model_config_path = _first_existing_path(
@@ -564,11 +586,15 @@ def build_predictor(
         weight_path = _first_existing_path(
             weights_root / "patchet_pretrain_weight" / "model.safetensors",
         )
-        return PatchETPretrainedPredictor(model_config_path=model_config_path, weight_path=weight_path, project_root=repo_root)
+        # FIX: pass batch_size through
+        return PatchETPretrainedPredictor(
+            model_config_path=model_config_path,
+            weight_path=weight_path,
+            project_root=repo_root,
+            batch_size=batch_size,
+        )
 
     if predictor_name == "EpHod":
         return EpHodPredictor(project_root=weights_root)
 
     raise ValueError(f"Unsupported predictor: {predictor_name}")
-
-
