@@ -471,7 +471,7 @@ class PatchETPretrainedPredictor(BasePredictor):
         self._torch = torch
         self.tokenizer = EsmTokenizer.from_pretrained(config["pretrain_model"])
 
-    def predict_many(self, sequences: Mapping[str, str]) -> Dict[str, Optional[float]]:
+    def predict_many(self, sequences: Mapping[str, str], batch_size: int = 4) -> Dict[str, Optional[float]]:
         ids = list(sequences.keys())
         seqs = [str(sequences[k]).strip().upper() for k in ids]
         out: Dict[str, Optional[float]] = {k: None for k in ids}
@@ -480,23 +480,30 @@ class PatchETPretrainedPredictor(BasePredictor):
         if not valid:
             return out
 
-        batch_seqs = [seq for _, seq in valid]
-        inputs = self.tokenizer(
-            batch_seqs,
-            return_tensors="pt",
-            padding="max_length",
-            truncation=True,
-            max_length=1000,
-        )
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        for start in range(0, len(valid), batch_size):
+            chunk = valid[start : start + batch_size]
+            chunk_seqs = [seq for _, seq in chunk]
 
-        with self._torch.no_grad():
-            outputs = self.model(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"], labels=None)
+            inputs = self.tokenizer(
+                chunk_seqs,
+                return_tensors="pt",
+                padding=True,          # pad to longest in THIS batch only
+                truncation=True,
+                max_length=1000,
+            )
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-        preds = outputs.pred
-        for i, (acc, _seq) in enumerate(valid):
-            pred = preds[i]
-            out[acc] = float(pred.item() if hasattr(pred, "item") else pred)
+            with self._torch.no_grad():
+                outputs = self.model(
+                    input_ids=inputs["input_ids"],
+                    attention_mask=inputs["attention_mask"],
+                    labels=None,
+                )
+
+            preds = outputs.pred
+            for i, (acc, _seq) in enumerate(chunk):
+                pred = preds[i]
+                out[acc] = float(pred.item() if hasattr(pred, "item") else pred)
 
         return out
 
