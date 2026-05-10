@@ -35,57 +35,85 @@ PED-Eval then evaluates designs from complementary perspectives: sequence recove
 
 ## Requirements
 
-Recommended environment:
-
-- Python 3.9 or later
-- CUDA-capable PyTorch environment for practical pipeline runtime
-- BLAST+ with `psiblast` on `PATH`
-- TMalign on `PATH` for structure-comparison metrics
+- Python 3.8
+- CUDA 11.7 (pipeline) or CUDA 12.x (optional ESMFold metrics)
+- PyTorch 2.4.1
+- BLAST+ 2.17.0 with `psiblast` on `PATH` (bundled via conda)
+- TMalign 20220227 on `PATH` (bundled via conda)
 - Bash, WSL, Git Bash, or Linux/macOS shell for `run_pipeline.sh`
+
+Key Python dependencies include `fair-esm==2.0.0`, `torch-geometric==2.4.0`, `biopython==1.81`, `transformers==4.46.3`, and `rdkit==2023.3.3`. See `environment.yml` for the full pinned dependency list.
 
 ## 🔧 Environment Setup (Recommended)
 
-We provide a Conda environment file to ensure reproducibility across systems.
+We provide a Conda environment file (`environment.yml`) for full reproducibility. This is the recommended path because it installs BLAST+, TMalign, CUDA libraries, and all Python packages in one step.
 
-### 1. Create the environment
+### Prerequisites
+
+- [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or Anaconda
+- Linux or macOS (Windows users: use WSL2)
+- NVIDIA GPU with CUDA 11.7-compatible driver (driver ≥ 450.80.02)
+
+### 1. Create and activate the environment
 
 ```bash
 conda env create -f environment.yml
 conda activate patchex-design
 ```
 
-Install PED-Eval:
+> **Note:** The environment is large (~10 GB). First-time creation may take 10–20 minutes depending on network speed.
+
+### 2. Install PED-Eval
 
 ```bash
 pip install -e ./PED-Eval
 ```
 
-For optional PED-Eval predictor and ESMFold structure metrics, install the optional dependencies:
+For optional PAS predictor and ESMFold structure metrics, install the optional extras:
 
 ```bash
 pip install -e "./PED-Eval[predictors,structure]"
 ```
 
-## Quick Start
+### 3. Verify the installation
 
-If you just want to run the workflow as fast as possible, do this:
+```bash
+python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA available:', torch.cuda.is_available())"
+psiblast -version
+TMalign --version
+```
 
-1. Install dependencies:
+---
 
+## Quick Start (pip only)
+
+If you prefer a pip-only setup (no Conda), note that **BLAST+ and TMalign must be installed separately** and placed on `PATH`.
+
+```bash
+pip install -r requirements.txt
+pip install -e ./PED-Eval
+```
+
+For PAS predictors and ESMFold-based structure metrics:
+
+```bash
+pip install -e "./PED-Eval[predictors,structure]"
+```
+
+> ⚠️ The `requirements.txt` was generated from a Linux/CUDA environment. Some packages (e.g. `torch-scatter`, `torch-sparse`, `torch-cluster`) are built for CUDA 12.1 and may not install correctly on other platforms. The Conda path (`environment.yml`) is strongly recommended for reproducibility.
+
+---
+
+## Running the Pipeline
+
+Once the environment is set up, follow these steps:
+
+1. Activate the environment:
    ```bash
-   pip install -r requirements.txt
-   pip install -e ./PED-Eval
+   conda activate patchex-design
    ```
-
-   For PAS predictors and ESMFold-based structure metrics, use:
-
-   ```bash
-   pip install -e "./PED-Eval[predictors,structure]"
-   ```
-
-2. Run PatchEX-Design. The first run automatically downloads the pipeline assets if they are missing.
-
-3. Run PED-Eval on the generated FASTA. If PED-Eval reports missing data or predictor weights, use the fallback instructions in [Troubleshooting](#troubleshooting).
+2. Run PatchEX-Design. The first run automatically downloads pipeline assets if they are missing.
+3. Run PED-Eval on the generated FASTA. If PED-Eval reports missing data or predictor weights, see [Troubleshooting](#troubleshooting).
 
 ### Fastest single-run example
 
@@ -329,7 +357,8 @@ metrics = evaluate_single_sequence(
 
 ## Troubleshooting
 
-- If `psiblast` is not found, install BLAST+ and ensure it is on `PATH`.
+- If `psiblast` is not found: with the Conda setup it is bundled automatically. For pip-only installs, download [BLAST+](https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/) and add the `bin/` directory to `PATH`.
+- If `TMalign` is not found: with the Conda setup it is bundled automatically. For pip-only installs, compile from source and add to `PATH`.
 - If the automatic asset download fails, try:
   ```bash
   python setup_assets.py --bundle pipeline
@@ -340,6 +369,7 @@ metrics = evaluate_single_sequence(
 - If PatchEX-Design cannot load oracle weights, check `patchex_weight/opt/` and `patchex_weight/ph/`.
 - If PED-Eval PAS mode cannot load a predictor, check `predictor_weights/` and install `PED-Eval[predictors]`.
 - If `run_pipeline.sh` fails on Windows PowerShell, run it from WSL or Git Bash.
+- If `torch.cuda.is_available()` returns `False`, verify your NVIDIA driver supports CUDA 11.7 (driver ≥ 450.80.02) and that `nvidia-smi` reports a valid GPU.
 
 Expected asset paths:
 
